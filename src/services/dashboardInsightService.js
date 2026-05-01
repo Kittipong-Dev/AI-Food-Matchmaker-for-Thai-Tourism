@@ -1,4 +1,5 @@
 import { query } from '../db/postgres.js';
+import { summarizeDashboardInsightWithLlm } from './ai/llmClient.js';
 
 const DEFAULT_DAYS = 30;
 
@@ -214,40 +215,54 @@ async function loadFunnel(restaurantId, days) {
 async function loadReviewStats(restaurantId, days) {
   const result = await query(
     `
+      with recent_reviews as (
+        select rating, review_bubbles
+        from public.reviews
+        where restaurant_id = $1
+          and created_at >= now() - ($2::int * interval '1 day')
+      ),
+      bubble_rows as (
+        select unnest(review_bubbles) as bubble
+        from recent_reviews
+      )
       select
-        count(*) as review_count,
-        avg(rating) as average_rating,
-        coalesce(array_agg(review_bubbles), '{}') as bubble_arrays
-      from public.reviews
-      where restaurant_id = $1
-        and created_at >= now() - ($2::int * interval '1 day')
+        (select count(*) from recent_reviews) as review_count,
+        (select avg(rating) from recent_reviews) as average_rating,
+        coalesce((select array_agg(bubble) from bubble_rows), '{}') as bubbles
     `,
     [restaurantId, days]
   );
 
   const row = result.rows[0] || {};
-  const bubbles = (row.bubble_arrays || []).flat();
 
   return {
     reviewCount: Number(row.review_count || 0),
     averageRating: row.average_rating === null ? null : Number(row.average_rating),
-    reviewBubbleCounts: countItems(bubbles)
+    reviewBubbleCounts: countItems(row.bubbles || [])
   };
 }
 
 async function loadSkipReasonCounts(restaurantId, days) {
   const result = await query(
     `
-      select coalesce(array_agg(reject_reasons), '{}') as reason_arrays
-      from public.match_histories
-      where restaurant_id = $1
-        and action = 'skipped'
-        and created_at >= now() - ($2::int * interval '1 day')
+      with skipped_events as (
+        select reject_reasons
+        from public.match_histories
+        where restaurant_id = $1
+          and action = 'skipped'
+          and created_at >= now() - ($2::int * interval '1 day')
+      ),
+      reason_rows as (
+        select unnest(reject_reasons) as reason
+        from skipped_events
+      )
+      select coalesce(array_agg(reason), '{}') as reasons
+      from reason_rows
     `,
     [restaurantId, days]
   );
 
-  return countItems((result.rows[0]?.reason_arrays || []).flat());
+  return countItems(result.rows[0]?.reasons || []);
 }
 
 async function loadTouristMix(restaurantId, days) {
@@ -276,8 +291,20 @@ async function loadTouristMix(restaurantId, days) {
   }));
 }
 
-export async function getRestaurantDashboard(restaurantId, { days } = {}) {
+function shouldIncludeLlm(includeLlm) {
+  return includeLlm !== false && includeLlm !== 'false';
+}
+
+function normalizeInsightLanguage(language) {
+  return language === 'en' ? 'en' : 'th';
+}
+
+export async function getRestaurantDashboard(
+  restaurantId,
+  { days, includeLlm = true, language = 'th' } = {}
+) {
   const normalizedDays = normalizeDays(days);
+  const insightLanguage = normalizeInsightLanguage(language);
   const restaurant = await loadRestaurant(restaurantId);
 
   if (!restaurant) {
@@ -301,11 +328,12 @@ export async function getRestaurantDashboard(restaurantId, { days } = {}) {
     menuRiskItems: menuHealth.filter((item) => item.severity === 'urgent' || item.severity === 'warning')
   });
 
-  return {
+  const dashboard = {
     restaurantId,
     restaurantNameTh: restaurant.name_th,
     restaurantNameEn: restaurant.name_en,
     periodDays: normalizedDays,
+    insightLanguage,
     latestDataAt: new Date().toISOString(),
     funnel: {
       impressions: funnel.viewed,
@@ -333,5 +361,21 @@ export async function getRestaurantDashboard(restaurantId, { days } = {}) {
       topSkipReasons: topEntries(skipReasonCounts, 5)
     },
     touristMix
+  };
+
+  if (!shouldIncludeLlm(includeLlm)) {
+    return dashboard;
+  }
+
+  const llmResult = await summarizeDashboardInsightWithLlm(dashboard);
+
+  return {
+    ...dashboard,
+    llmInsight: {
+      provider: llmResult.source,
+      warning: llmResult.warning,
+      generatedAt: new Date().toISOString(),
+      ...llmResult.insight
+    }
   };
 }

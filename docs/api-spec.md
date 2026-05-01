@@ -41,10 +41,12 @@ Friendly API landing response.
   "status": "ok",
   "phase": 10,
   "docs": {
-    "health": "/api/health",
-    "tags": "/api/tags",
-    "recommend": "/api/recommend",
-    "demoIds": "/api/dev/demo-ids"
+      "health": "/api/health",
+      "tags": "/api/tags",
+      "recommend": "/api/recommend",
+      "userPreferences": "/api/user-preferences/:userId",
+      "groups": "/api/groups",
+      "demoIds": "/api/dev/demo-ids"
   }
 }
 ```
@@ -225,7 +227,7 @@ GET /api/menu-dictionary/search?q=%E0%B8%95%E0%B9%89%E0%B8%A1%E0%B8%A2%E0%B8%B3
 
 Suggests menu details and bubble tags from a menu name.
 
-Dictionary entries are used first. Unknown menu names use an LLM backend service when an API key is configured, or a mock fallback when no key is available.
+Dictionary entries are used first. Unknown menu names use an LLM backend service when an API key is configured, or a mock fallback when no key is available. Supported providers are OpenRouter (`LLM_PROVIDER=openrouter`) and OpenAI (`LLM_PROVIDER=openai`).
 
 All allergen and dietary suggestions require restaurant confirmation before being trusted.
 
@@ -309,6 +311,87 @@ If `menuName` is missing:
 - Do not expose Supabase service role keys or Google Maps API keys in frontend code.
 - Frontend should treat `requiresConfirmation: true` as mandatory before saving trusted allergen/dietary data.
 - Display AI-generated suggestions as suggestions, not confirmed facts.
+
+## GET /api/user-preferences/:userId
+
+Returns one user's personalization profile.
+
+## PUT /api/user-preferences/:userId
+
+Creates or updates one user's personalization profile. Fields are partial on update.
+
+### Request Body
+
+```json
+{
+  "foodTags": ["local_food", "spicy"],
+  "viewTags": ["mountain_view"],
+  "atmosphereTags": ["quiet"],
+  "serviceTags": ["english_menu_available"],
+  "placeContextTags": ["local_hidden_gem"],
+  "dietaryRestrictions": ["no_pork"],
+  "allergies": ["shrimp"],
+  "transportModes": ["walking", "taxi"],
+  "budgetMin": 50,
+  "budgetMax": 250,
+  "maxDistanceKm": 8,
+  "learnedPreferences": {}
+}
+```
+
+### OpenRouter Setup
+
+For a free-model demo provider:
+
+```env
+LLM_PROVIDER=openrouter
+OPENROUTER_API_KEY=your-openrouter-key
+OPENROUTER_MODEL=openrouter/free
+```
+
+`openrouter/free` may route to different free models over time. The backend requests structured-output-capable providers and enables OpenRouter response healing, but if OpenRouter is unavailable, rate-limited, or still returns invalid JSON, the API returns mock fallback suggestions instead of failing the demo flow.
+
+## GET /api/groups
+
+Lists groups. Pass `userId` to return only groups owned by or joined by that user.
+
+## POST /api/groups
+
+Creates a group and automatically adds the owner as a group member.
+
+```json
+{
+  "name": "Chiang Mai Trip",
+  "ownerUserId": "10000000-0000-0000-0000-000000000001"
+}
+```
+
+## GET /api/groups/:groupId
+
+Returns one group.
+
+## PUT /api/groups/:groupId
+
+Updates group metadata.
+
+## GET /api/groups/:groupId/members
+
+Returns group members with basic user profile data.
+
+## POST /api/groups/:groupId/members
+
+Adds or updates a member.
+
+```json
+{
+  "userId": "10000000-0000-0000-0000-000000000001",
+  "role": "member"
+}
+```
+
+## DELETE /api/groups/:groupId/members/:userId
+
+Removes a group member.
 
 ## GET /api/restaurants
 
@@ -559,6 +642,7 @@ The recommendation engine:
 4. Searches menu embeddings using pgvector.
 5. Groups safe matching menus back into restaurants.
 6. Adds restaurant-level scoring from distance, restaurant embeddings, and tag matches.
+7. If Google Maps is configured, adjusts score with route travel time.
 
 ### Request Body
 
@@ -572,6 +656,8 @@ The recommendation engine:
   },
   "query": "spicy local food with mountain view no pork",
   "language": "en",
+  "transportMode": "taxi",
+  "maxTravelMinutes": 30,
   "limit": 5
 }
 ```
@@ -595,6 +681,9 @@ The recommendation engine:
 | `atmosphereTags` | string[] | no | Temporary atmosphere preference tags. |
 | `serviceTags` | string[] | no | Temporary service preference tags. |
 | `placeContextTags` | string[] | no | Temporary place-context preference tags. |
+| `transportMode` | string | no | Route mode such as `walking`, `driving`, `taxi`, `motorbike`, or `public_transit`. |
+| `transportModes` | string[] | no | Allowed/preferred modes. First value is used when `transportMode` is missing. |
+| `maxTravelMinutes` | number | no | Optional route-time target. Requires `TRANSPORT_DISTANCE_PROVIDER=google` or `serpapi` to affect scoring. |
 
 ### Response
 
@@ -611,6 +700,10 @@ The recommendation engine:
       "restaurantNameTh": "ครัวบ้านสวน",
       "restaurantNameEn": "Baan Suan Kitchen",
       "googleMapsUrl": "https://maps.google.com/?q=18.7883,98.9853",
+      "location": {
+        "lat": 18.7883,
+        "lng": 98.9853
+      },
       "distanceKm": 0,
       "score": 60,
       "reasons": [
@@ -630,6 +723,14 @@ The recommendation engine:
       "warnings": [
         "Allergen and dietary information should still be confirmed with the restaurant."
       ],
+      "transport": {
+        "provider": "serpapi_google_maps",
+        "mode": "taxi",
+        "durationSeconds": 720,
+        "durationMinutes": 12,
+        "distanceMeters": 5300,
+        "distanceKm": 5.3
+      },
       "scoreBreakdown": {
         "bestMenuSimilarity": 0.4658,
         "restaurantSimilarity": 0.4472,
@@ -640,6 +741,13 @@ The recommendation engine:
           "atmosphere": 1,
           "service": 1,
           "placeContext": 2
+        },
+        "transport": {
+          "mode": "taxi",
+          "durationMinutes": 12,
+          "distanceKm": 5.3,
+          "score": 6,
+          "penalty": 0
         }
       }
     }
@@ -649,7 +757,9 @@ The recommendation engine:
 
 ### Current MVP Limitations
 
-- Transport scoring still uses straight-line PostGIS distance, not Google Maps route time.
+- Route-time scoring requires either `SERPAPI_API_KEY` with `TRANSPORT_DISTANCE_PROVIDER=serpapi`, or `GOOGLE_MAPS_API_KEY` with `TRANSPORT_DISTANCE_PROVIDER=google`.
+- If the origin and destination are the same/very close, the API returns a `same_or_nearby_location` estimate with `0` minutes.
+- If SerpApi calls Google Maps but Google returns no route, the API returns `serpapi_google_maps_fallback` with a straight-line time estimate and `sourceWarning`.
 - Learned preferences are loaded but not deeply scored yet.
 - Recommendation explanations are simple rule-based strings.
 
@@ -795,7 +905,7 @@ Returns recent reviews for a restaurant.
 
 Returns dashboard insight data for restaurant owners.
 
-This endpoint is MVP rule-based. It aggregates real data from:
+This endpoint aggregates real data from:
 
 - `match_histories`
 - `reviews`
@@ -803,11 +913,15 @@ This endpoint is MVP rule-based. It aggregates real data from:
 - `restaurants`
 - `users`
 
+It also returns `llmInsight` when `includeLlm` is not `false`. The LLM summary uses OpenRouter/OpenAI when configured and falls back to a local rule-based mock summary when keys are missing or the provider fails.
+
 ### Query Parameters
 
 | Name | Type | Required | Description |
 | --- | --- | --- | --- |
 | `days` | number | no | Lookback window. Default `30`, max `365`. |
+| `includeLlm` | boolean | no | Include LLM business insight. Default `true`; set `false` to skip provider calls. |
+| `language` | string | no | LLM insight language. `th` or `en`. Default `th` for Thai restaurant owners. |
 
 ### Response
 
@@ -818,6 +932,7 @@ This endpoint is MVP rule-based. It aggregates real data from:
     "restaurantNameTh": "ครัวบ้านสวน",
     "restaurantNameEn": "Baan Suan Kitchen",
     "periodDays": 30,
+    "insightLanguage": "th",
     "latestDataAt": "2026-05-01T00:00:00.000Z",
     "funnel": {
       "impressions": 1240,
@@ -830,6 +945,26 @@ This endpoint is MVP rule-based. It aggregates real data from:
       "type": "risk",
       "title": "AI Insight",
       "message": "Your restaurant is getting attention, but recent skip events mention allergy or safety concerns."
+    },
+    "llmInsight": {
+      "provider": "openrouter",
+      "generatedAt": "2026-05-01T00:00:00.000Z",
+      "summary": "นักท่องเที่ยวชอบรสชาติท้องถิ่นของร้าน แต่ความชัดเจนเรื่องแพ้อาหารและการเดินทางยังอาจทำให้ลูกค้าบางส่วนลังเล",
+      "whatToImprove": [
+        "ยืนยันแท็กสารก่อภูมิแพ้ในเมนูที่ยังรอตรวจสอบ",
+        "เพิ่มคำอธิบายเมนูภาษาอังกฤษให้ชัดเจนขึ้น"
+      ],
+      "priorityActions": [
+        "ยืนยันส่วนผสมและแท็กแพ้อาหารของเมนูที่มีความเสี่ยงสูง",
+        "เพิ่มข้อมูลการเดินทางและที่จอดรถในโปรไฟล์ร้าน"
+      ],
+      "riskFlags": [
+        "ข้อมูลแพ้อาหารที่ยังไม่ยืนยันอาจทำให้นักท่องเที่ยวปัดข้าม"
+      ],
+      "opportunities": [
+        "นำจุดเด่นเรื่องรสชาติท้องถิ่นและรีวิวเชิงบวกไปใช้โปรโมต"
+      ],
+      "confidence": 0.74
     },
     "sections": {
       "menu": {

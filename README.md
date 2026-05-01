@@ -1,6 +1,6 @@
 # AI Local Food Matchmaker for Thai Tourism
 
-Phase 10 sets up the PostgreSQL/Supabase database foundation, tag/menu dictionary APIs, menu tag suggestions, restaurant/menu CRUD APIs, embedding refresh, menu-first recommendations, match history learning, reviews, business dashboard insights, image metadata, and demo polish.
+Phase 10 sets up the PostgreSQL/Supabase database foundation, tag/menu dictionary APIs, menu tag suggestions, restaurant/menu CRUD APIs, user preference/group APIs, embedding refresh, menu-first recommendations, match history learning, reviews, business dashboard insights, image metadata, and demo polish.
 
 ## Current Phase
 
@@ -18,24 +18,27 @@ Implemented:
 - Minimal Express backend
 - Tag catalog APIs
 - Menu dictionary APIs
-- Menu tag suggestion API with dictionary-first logic and mock LLM fallback
+- Menu tag suggestion API with dictionary-first logic, optional OpenAI provider, and mock fallback
 - Restaurant CRUD APIs
 - Menu CRUD APIs
+- User preference CRUD APIs
+- Group CRUD and member APIs
 - Embedding refresh API with optional Python FastAPI embedding service
-- Menu-first recommendation API
+- Menu-first recommendation API with optional Google Routes travel-time scoring
 - Match history API with MVP preference learner
 - Review APIs
 - Restaurant dashboard insight API
+- Dashboard LLM business insight with OpenRouter/OpenAI and mock fallback
 - Image metadata APIs for restaurants and menus
 - Root API landing response
 - Demo IDs endpoint for frontend integration
 
 Not implemented yet:
 
-- Tag API
-- Real LLM provider integration
 - CRUD screens
 - Production auth and permissions
+- Paid ads/boosting
+- Real LLM dashboard narrative generation
 
 ## Database Files
 
@@ -62,10 +65,31 @@ DATABASE_URL=postgresql://...
 SUPABASE_URL=https://your-project.supabase.co
 SUPABASE_SERVICE_ROLE_KEY=...
 GOOGLE_MAPS_API_KEY=...
+SERPAPI_API_KEY=...
+TRANSPORT_DISTANCE_PROVIDER=serpapi
+LLM_PROVIDER=openrouter
+OPENROUTER_API_KEY=...
+OPENROUTER_MODEL=openrouter/free
 EMBEDDING_SERVICE_URL=http://localhost:8001
 ```
 
 Never expose `SUPABASE_SERVICE_ROLE_KEY` to frontend JavaScript.
+
+For free/low-cost LLM menu suggestions and dashboard summaries, set `LLM_PROVIDER=openrouter` and use OpenRouter's free router model `openrouter/free`. The backend asks OpenRouter for structured-output-capable providers and enables response healing. If `OPENROUTER_API_KEY` is missing, the provider fails, or the model returns invalid JSON, the backend falls back to mock suggestions/insights.
+
+For route travel time, use either:
+
+```bash
+TRANSPORT_DISTANCE_PROVIDER=serpapi
+SERPAPI_API_KEY=...
+```
+
+or:
+
+```bash
+TRANSPORT_DISTANCE_PROVIDER=google
+GOOGLE_MAPS_API_KEY=...
+```
 
 ## Apply Schema In Supabase
 
@@ -141,11 +165,15 @@ curl http://localhost:3000/api/menu-dictionary
 curl "http://localhost:3000/api/menu-dictionary/search?q=tom"
 curl -X POST http://localhost:3000/api/menu/suggest-tags -H "Content-Type: application/json" -d "{\"menuName\":\"Tom Yum Kung\",\"language\":\"en\"}"
 curl http://localhost:3000/api/restaurants
+curl http://localhost:3000/api/user-preferences/10000000-0000-0000-0000-000000000001
+curl -X PUT http://localhost:3000/api/user-preferences/10000000-0000-0000-0000-000000000001 -H "Content-Type: application/json" -d "{\"foodTags\":[\"local_food\",\"spicy\"],\"allergies\":[\"shrimp\"],\"transportModes\":[\"walking\",\"taxi\"],\"budgetMax\":250,\"maxDistanceKm\":8}"
+curl -X POST http://localhost:3000/api/groups -H "Content-Type: application/json" -d "{\"name\":\"Chiang Mai Trip\",\"ownerUserId\":\"10000000-0000-0000-0000-000000000001\"}"
 curl -X POST http://localhost:3000/api/embeddings/refresh -H "Content-Type: application/json" -d "{\"target\":\"menus\",\"language\":\"en\",\"limit\":10}"
-curl -X POST http://localhost:3000/api/recommend -H "Content-Type: application/json" -d "{\"userId\":\"10000000-0000-0000-0000-000000000001\",\"currentLocation\":{\"lat\":18.7883,\"lng\":98.9853},\"query\":\"spicy local food with mountain view no pork\",\"language\":\"en\",\"limit\":5}"
+curl -X POST http://localhost:3000/api/recommend -H "Content-Type: application/json" -d "{\"userId\":\"10000000-0000-0000-0000-000000000001\",\"currentLocation\":{\"lat\":18.7883,\"lng\":98.9853},\"query\":\"spicy local food with mountain view no pork\",\"language\":\"en\",\"transportMode\":\"taxi\",\"maxTravelMinutes\":30,\"limit\":5}"
 curl -X POST http://localhost:3000/api/match-history -H "Content-Type: application/json" -d "{\"userId\":\"10000000-0000-0000-0000-000000000001\",\"restaurantId\":\"20000000-0000-0000-0000-000000000001\",\"action\":\"selected\",\"matchScore\":88}"
 curl -X POST http://localhost:3000/api/reviews -H "Content-Type: application/json" -d "{\"userId\":\"10000000-0000-0000-0000-000000000001\",\"restaurantId\":\"20000000-0000-0000-0000-000000000001\",\"rating\":5,\"reviewBubbles\":[\"good_local_taste\",\"friendly_staff\"],\"comment\":\"Great local taste\"}"
 curl http://localhost:3000/api/dashboard/restaurants/20000000-0000-0000-0000-000000000001
+curl "http://localhost:3000/api/dashboard/restaurants/20000000-0000-0000-0000-000000000001?days=30&includeLlm=true&language=th"
 curl -X PUT http://localhost:3000/api/images/menus/YOUR_MENU_ID -H "Content-Type: application/json" -d "{\"imageUrl\":\"https://example.com/menu.png\",\"imageType\":\"ai_generated\"}"
 curl http://localhost:3000/api/dev/demo-ids
 ```

@@ -8,7 +8,9 @@ dashboardRouter.get(
   '/restaurants/:restaurantId',
   asyncHandler(async (req, res) => {
     const dashboard = await getRestaurantDashboard(req.params.restaurantId, {
-      days: req.query.days
+      days: req.query.days,
+      includeLlm: req.query.includeLlm,
+      language: req.query.language
     });
 
     res.json({ data: dashboard });

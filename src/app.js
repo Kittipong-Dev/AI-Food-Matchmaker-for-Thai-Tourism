@@ -14,10 +14,12 @@ import { reviewsRouter } from './routes/reviews.js';
 import { dashboardRouter } from './routes/dashboard.js';
 import { imagesRouter } from './routes/images.js';
 import { devRouter } from './routes/dev.js';
+import { userPreferencesRouter } from './routes/userPreferences.js';
+import { groupsRouter } from './routes/groups.js';
 
 const app = express();
 
-app.use(cors());
+app.use(cors({ origin: "*"}));
 app.use(express.json());
 app.use(express.static('public'));
 
@@ -30,6 +32,8 @@ app.get('/', (_req, res) => {
       health: '/api/health',
       tags: '/api/tags',
       recommend: '/api/recommend',
+      userPreferences: '/api/user-preferences/:userId',
+      groups: '/api/groups',
       demoIds: '/api/dev/demo-ids'
     }
   });
@@ -48,6 +52,8 @@ app.use('/api/menu-dictionary', menuDictionaryRouter);
 app.use('/api/menu', menuSuggestionRouter);
 app.use('/api/restaurants', restaurantsRouter);
 app.use('/api/menus', menusRouter);
+app.use('/api/user-preferences', userPreferencesRouter);
+app.use('/api/groups', groupsRouter);
 app.use('/api/embeddings', embeddingsRouter);
 app.use('/api/recommend', recommendationsRouter);
 app.use('/api/match-history', matchHistoryRouter);

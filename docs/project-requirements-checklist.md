@@ -24,21 +24,29 @@ Not yet complete as a full product:
 
 - frontend screens are handled separately by collaborator
 - auth/permissions are not production-ready
-- user preference CRUD API is not built yet
-- group CRUD API is not built yet
+- user preference CRUD API is now implemented
+- group CRUD API is now implemented
 - paid ads/boosting system is not implemented
-- Google Maps route-time scoring is not implemented yet
-- real LLM dashboard summary is not implemented yet
+- Google Maps route-time scoring is implemented when configured
+- real LLM dashboard summary is now implemented with fallback
+
+Latest backend update:
+
+- `GET/PUT /api/user-preferences/:userId` now supports personalize data, including food tags, service tags, dietary restrictions, allergies, budget, max distance, and transport modes.
+- `GET/POST/PUT /api/groups` plus member add/list/remove APIs now support group/gang preference flows.
+- `POST /api/menu/suggest-tags` now uses OpenRouter/OpenAI for unknown menu names when configured, with mock fallback when absent/failing.
+- `POST /api/recommend` now supports `transportMode` and `maxTravelMinutes`; Google Routes adjusts scoring when `GOOGLE_MAPS_API_KEY` and `TRANSPORT_DISTANCE_PROVIDER=google` are configured.
+- `GET /api/dashboard/restaurants/:id` now includes `llmInsight` using OpenRouter/OpenAI when configured, with mock fallback.
 
 ## Tourist Side
 
 | Requirement | Status | Evidence / Notes |
 | --- | --- | --- |
-| เขียนได้ว่าชอบกินอาหารประเภทไหน | Partial | Database supports `user_preferences.food_tags`; recommendation uses saved food tags. Missing dedicated API to update user preferences from frontend. |
+| เขียนได้ว่าชอบกินอาหารประเภทไหน | Done MVP | `GET/PUT /api/user-preferences/:userId` supports saved food tags and recommendation uses them. |
 | เขียนได้ว่าไม่กินอะไร เช่น กินเจ ไม่กินหมู แพ้กุ้ง | Partial | Database supports `dietary_restrictions` and `allergies`; recommendation hard-filters menus. Missing dedicated personalize update API. |
 | เอาประวัติการเลือกร้านย้อนหลังมาร่วม | Partial | `POST /api/match-history` saves selected/skipped/viewed and updates `learned_preferences`. Recommendation loads learned preferences, but scoring does not deeply use learned weights yet. |
 | ให้เลือก condition เกี่ยวกับการเดินทาง | Partial | `transport_modes` exists in `user_preferences`. Recommendation uses straight-line PostGIS distance, not transport mode route time yet. |
-| join personalize / condition สำหรับเที่ยวเป็น gang | Partial | Group tables exist and recommendation can merge group member preferences when `groupId` is provided. Missing group CRUD/member management APIs. |
+| join personalize / condition สำหรับเที่ยวเป็น gang | Done MVP | Group tables and `GET/POST/PUT/DELETE /api/groups` APIs exist; recommendation merges group member preferences when `groupId` is provided. |
 
 ## Recommender System
 
@@ -72,7 +80,7 @@ Not yet complete as a full product:
 | ร้านใส่เมนู | Done | `POST /api/restaurants/:restaurantId/menus`, `PUT /api/menus/:id`. |
 | ใส่ชื่อเมนูอย่างเดียวแล้วช่วย suggest tags | Done MVP | `POST /api/menu/suggest-tags` dictionary-first and mock AI fallback. |
 | เมนูทั่วไป ดึงจาก database มาแปะ | Done | `menu_dictionary` and `/api/menu-dictionary/search`. |
-| เมนูแปลกๆ gen | Partial | Mock LLM fallback exists. Real LLM provider integration still pending. |
+| เมนูแปลกๆ gen | Done MVP | `POST /api/menu/suggest-tags` uses OpenRouter/OpenAI when configured and falls back to mock suggestions when absent/failing. |
 | ใส่ label ว่าไม่ใช่รูปจริง | Done | `imageType = ai_generated` returns label: `AI-generated illustration, not actual photo`. |
 
 ## Local Restaurant Visibility / Ads
@@ -91,8 +99,8 @@ Not yet complete as a full product:
 | Mock fallback | Done | Node falls back to deterministic 384-dim mock vectors. |
 | Menu vector search | Done MVP | Recommendation uses menu embeddings. |
 | Restaurant vector search | Done MVP | Recommendation uses restaurant embeddings as part of scoring. |
-| LLM abstraction | Partial | LLM client abstraction exists for menu suggestion, but real provider not implemented. |
-| Dashboard AI summary | Partial | Rule-based AI insight exists. Real LLM summary not implemented. |
+| LLM abstraction | Done MVP | LLM client abstraction supports OpenRouter Chat Completions and OpenAI Responses API for menu suggestions with mock fallback. |
+| Dashboard AI summary | Done MVP | Dashboard includes `llmInsight` from OpenRouter/OpenAI when configured, with mock fallback. |
 
 ## Deployment / Collaboration
 
@@ -107,25 +115,17 @@ Not yet complete as a full product:
 
 These are the most useful next backend gaps if the frontend team needs full demo flows:
 
-1. User preference CRUD API
-   - Needed for personalize page to save preferences.
-   - Suggested endpoint: `GET/PUT /api/user-preferences/:userId`.
-
-2. Group CRUD API
-   - Needed for gang/travel group flow.
-   - Suggested endpoints: `POST /api/groups`, `POST /api/groups/:id/members`.
-
-3. Real LLM provider
-   - Needed for unusual menu names beyond mock fallback.
-
-4. Transport route-time scoring
-   - Needed for Google Maps travel-time condition.
-
-5. Auth and authorization
+1. Auth and authorization
    - Needed before production or public write access.
+
+2. Frontend screens
+   - Collaborator can now connect to the full MVP backend APIs.
+
+3. Ads/boosting model
+   - Needed for paid local restaurant promotion.
 
 ## Presentation Answer
 
 If asked “does this answer the project goal?”:
 
-> Yes, the backend MVP answers the main goal. It can recommend local restaurants by matching safe menus first, then ranking restaurants by location, tags, atmosphere, and learned behavior. It also supports restaurant/menu entry, menu tag suggestions, reviews, dashboard insights, embeddings, and deployed API collaboration. Some production features like auth, group management UI/API, real LLM fallback, Google Maps route-time scoring, and paid ads are still future work.
+> Yes, the backend MVP answers the main goal. It can recommend local restaurants by matching safe menus first, then ranking restaurants by location, tags, atmosphere, learned behavior, and optional Google route time. It also supports restaurant/menu entry, user preferences, group management, OpenRouter/OpenAI-backed menu tag suggestions, LLM dashboard business insights with mock fallback, reviews, embeddings, and deployed API collaboration. Production auth, frontend screens, and paid ads are still future work.

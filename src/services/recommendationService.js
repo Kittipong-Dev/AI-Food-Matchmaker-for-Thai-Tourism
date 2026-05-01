@@ -1,5 +1,6 @@
 import { query as dbQuery } from '../db/postgres.js';
 import { embedTexts } from './embedding/embeddingClient.js';
+import { getRouteEstimate } from './transportService.js';
 
 const DEFAULT_LIMIT = 10;
 const MAX_LIMIT = 50;
@@ -130,6 +131,11 @@ function combinePreferences(rows) {
 }
 
 function buildEffectiveConstraints(input, preferences) {
+  const transportModes = unique([
+    ...(input.transportModes || []),
+    ...(preferences.transportModes || [])
+  ]);
+
   return {
     allergies: unique([...(preferences.allergies || []), ...(input.allergies || [])]),
     dietaryRestrictions: unique([
@@ -148,7 +154,18 @@ function buildEffectiveConstraints(input, preferences) {
     placeContextTags: unique([
       ...(preferences.placeContextTags || []),
       ...(input.placeContextTags || [])
-    ])
+    ]),
+    transportModes,
+    transportMode:
+      input.transportMode ||
+      input.preferredTransportMode ||
+      transportModes[0] ||
+      preferences.transportModes?.[0] ||
+      null,
+    maxTravelMinutes:
+      input.maxTravelMinutes === undefined || input.maxTravelMinutes === null
+        ? null
+        : Number(input.maxTravelMinutes)
   };
 }
 
@@ -304,6 +321,10 @@ function mapRecommendation(row, constraints) {
     restaurantNameTh: row.name_th,
     restaurantNameEn: row.name_en,
     googleMapsUrl: row.google_maps_url,
+    location: {
+      lat: row.latitude === null ? null : Number(row.latitude),
+      lng: row.longitude === null ? null : Number(row.longitude)
+    },
     distanceKm: row.distance_km === null ? null : Number(row.distance_km),
     score,
     reasons: createReasons(row, constraints),
@@ -329,6 +350,81 @@ function mapRecommendation(row, constraints) {
       }
     }
   };
+}
+
+function clampScore(score) {
+  return Math.max(0, Math.min(100, Math.round(score)));
+}
+
+async function applyTransportScoring(recommendations, { point, constraints }) {
+  if (!point || !constraints.transportMode) {
+    return recommendations;
+  }
+
+  const maxTravelMinutes = Number.isFinite(constraints.maxTravelMinutes)
+    ? constraints.maxTravelMinutes
+    : null;
+
+  const updated = [];
+
+  for (const recommendation of recommendations) {
+    if (recommendation.location.lat === null || recommendation.location.lng === null) {
+      updated.push(recommendation);
+      continue;
+    }
+
+    const transport = await getRouteEstimate({
+      origin: point,
+      destination: {
+        lat: recommendation.location.lat,
+        lng: recommendation.location.lng
+      },
+      transportMode: constraints.transportMode
+    });
+
+    if (!transport || transport.warning || transport.durationMinutes === null) {
+      updated.push({
+        ...recommendation,
+        transport: transport || null
+      });
+      continue;
+    }
+
+    const targetMinutes = maxTravelMinutes || 45;
+    const transportScore = Math.max(0, 10 * (1 - transport.durationMinutes / targetMinutes));
+    const overTimePenalty =
+      maxTravelMinutes && transport.durationMinutes > maxTravelMinutes ? 20 : 0;
+    const score = clampScore(recommendation.score + transportScore - overTimePenalty);
+    const warnings = [...recommendation.warnings];
+
+    if (overTimePenalty > 0) {
+      warnings.push(`Estimated travel time is over ${maxTravelMinutes} minutes.`);
+    }
+
+    updated.push({
+      ...recommendation,
+      distanceKm: transport.distanceKm ?? recommendation.distanceKm,
+      score,
+      reasons: [
+        ...recommendation.reasons,
+        `Estimated ${transport.durationMinutes} minutes by ${constraints.transportMode}.`
+      ],
+      warnings,
+      transport,
+      scoreBreakdown: {
+        ...recommendation.scoreBreakdown,
+        transport: {
+          mode: constraints.transportMode,
+          durationMinutes: transport.durationMinutes,
+          distanceKm: transport.distanceKm,
+          score: Math.round(transportScore * 10) / 10,
+          penalty: overTimePenalty
+        }
+      }
+    });
+  }
+
+  return updated.sort((a, b) => b.score - a.score);
 }
 
 export async function recommendRestaurants(input = {}) {
@@ -419,6 +515,8 @@ export async function recommendRestaurants(input = {}) {
         r.id as restaurant_id,
         r.name_th,
         r.name_en,
+        r.latitude,
+        r.longitude,
         r.google_maps_url,
         r.view_tags,
         r.atmosphere_tags,
@@ -448,6 +546,8 @@ export async function recommendRestaurants(input = {}) {
         r.id,
         r.name_th,
         r.name_en,
+        r.latitude,
+        r.longitude,
         r.google_maps_url,
         r.view_tags,
         r.atmosphere_tags,
@@ -483,11 +583,13 @@ export async function recommendRestaurants(input = {}) {
 
   const result = await dbQuery(sql, params.values);
 
+  const recommendations = result.rows.map((row) => mapRecommendation(row, constraints));
+
   return {
     query: textQuery,
     language,
     embeddingProvider: embeddingResult.provider,
     warnings: embeddingResult.warning ? [embeddingResult.warning] : [],
-    data: result.rows.map((row) => mapRecommendation(row, constraints))
+    data: await applyTransportScoring(recommendations, { point, constraints })
   };
 }
