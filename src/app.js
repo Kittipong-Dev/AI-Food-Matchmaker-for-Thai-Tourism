@@ -9,6 +9,11 @@ import { restaurantsRouter } from './routes/restaurants.js';
 import { menusRouter } from './routes/menus.js';
 import { embeddingsRouter } from './routes/embeddings.js';
 import { recommendationsRouter } from './routes/recommendations.js';
+import { matchHistoryRouter } from './routes/matchHistory.js';
+import { reviewsRouter } from './routes/reviews.js';
+import { dashboardRouter } from './routes/dashboard.js';
+import { imagesRouter } from './routes/images.js';
+import { devRouter } from './routes/dev.js';
 
 const app = express();
 
@@ -16,11 +21,25 @@ app.use(cors());
 app.use(express.json());
 app.use(express.static('public'));
 
+app.get('/', (_req, res) => {
+  res.json({
+    service: 'thai-food-matchmaker',
+    status: 'ok',
+    phase: 10,
+    docs: {
+      health: '/api/health',
+      tags: '/api/tags',
+      recommend: '/api/recommend',
+      demoIds: '/api/dev/demo-ids'
+    }
+  });
+});
+
 app.get('/api/health', (_req, res) => {
   res.json({
     ok: true,
     service: 'thai-food-matchmaker',
-    phase: 6
+    phase: 10
   });
 });
 
@@ -31,6 +50,11 @@ app.use('/api/restaurants', restaurantsRouter);
 app.use('/api/menus', menusRouter);
 app.use('/api/embeddings', embeddingsRouter);
 app.use('/api/recommend', recommendationsRouter);
+app.use('/api/match-history', matchHistoryRouter);
+app.use('/api/reviews', reviewsRouter);
+app.use('/api/dashboard', dashboardRouter);
+app.use('/api/images', imagesRouter);
+app.use('/api/dev', devRouter);
 app.use('/api/db', dbHealthRouter);
 
 app.use((req, res) => {

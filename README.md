@@ -1,6 +1,6 @@
 # AI Local Food Matchmaker for Thai Tourism
 
-Phase 6 sets up the PostgreSQL/Supabase database foundation, tag/menu dictionary APIs, menu tag suggestions, restaurant/menu CRUD APIs, embedding refresh, and menu-first recommendations.
+Phase 10 sets up the PostgreSQL/Supabase database foundation, tag/menu dictionary APIs, menu tag suggestions, restaurant/menu CRUD APIs, embedding refresh, menu-first recommendations, match history learning, reviews, business dashboard insights, image metadata, and demo polish.
 
 ## Current Phase
 
@@ -23,13 +23,19 @@ Implemented:
 - Menu CRUD APIs
 - Embedding refresh API with optional Python FastAPI embedding service
 - Menu-first recommendation API
+- Match history API with MVP preference learner
+- Review APIs
+- Restaurant dashboard insight API
+- Image metadata APIs for restaurants and menus
+- Root API landing response
+- Demo IDs endpoint for frontend integration
 
 Not implemented yet:
 
 - Tag API
 - Real LLM provider integration
 - CRUD screens
-- Match history and preference learner
+- Production auth and permissions
 
 ## Database Files
 
@@ -116,7 +122,7 @@ Expected response:
 {
   "ok": true,
   "service": "thai-food-matchmaker",
-  "phase": 6
+  "phase": 10
 }
 ```
 
@@ -125,6 +131,7 @@ Expected response:
 After schema and seed are applied, test:
 
 ```bash
+curl http://localhost:3000/
 curl http://localhost:3000/api/tags
 curl "http://localhost:3000/api/tags?category=service"
 curl http://localhost:3000/api/tags/categories
@@ -134,6 +141,11 @@ curl -X POST http://localhost:3000/api/menu/suggest-tags -H "Content-Type: appli
 curl http://localhost:3000/api/restaurants
 curl -X POST http://localhost:3000/api/embeddings/refresh -H "Content-Type: application/json" -d "{\"target\":\"menus\",\"language\":\"en\",\"limit\":10}"
 curl -X POST http://localhost:3000/api/recommend -H "Content-Type: application/json" -d "{\"userId\":\"10000000-0000-0000-0000-000000000001\",\"currentLocation\":{\"lat\":18.7883,\"lng\":98.9853},\"query\":\"spicy local food with mountain view no pork\",\"language\":\"en\",\"limit\":5}"
+curl -X POST http://localhost:3000/api/match-history -H "Content-Type: application/json" -d "{\"userId\":\"10000000-0000-0000-0000-000000000001\",\"restaurantId\":\"20000000-0000-0000-0000-000000000001\",\"action\":\"selected\",\"matchScore\":88}"
+curl -X POST http://localhost:3000/api/reviews -H "Content-Type: application/json" -d "{\"userId\":\"10000000-0000-0000-0000-000000000001\",\"restaurantId\":\"20000000-0000-0000-0000-000000000001\",\"rating\":5,\"reviewBubbles\":[\"good_local_taste\",\"friendly_staff\"],\"comment\":\"Great local taste\"}"
+curl http://localhost:3000/api/dashboard/restaurants/20000000-0000-0000-0000-000000000001
+curl -X PUT http://localhost:3000/api/images/menus/YOUR_MENU_ID -H "Content-Type: application/json" -d "{\"imageUrl\":\"https://example.com/menu.png\",\"imageType\":\"ai_generated\"}"
+curl http://localhost:3000/api/dev/demo-ids
 ```
 
 Check database connectivity separately:
@@ -173,6 +185,42 @@ Recommendation will be menu-first:
 4. Score restaurants using view, atmosphere, service, place context, reviews, distance, and learned preferences.
 
 AI-suggested menu allergy and dietary tags must always require restaurant confirmation before being trusted.
+
+## Frontend Integration Quickstart
+
+Use your deployed API base URL:
+
+```js
+const API_BASE_URL = "https://your-vercel-domain.vercel.app";
+```
+
+Get demo IDs:
+
+```js
+const demo = await fetch(`${API_BASE_URL}/api/dev/demo-ids`).then((res) => res.json());
+```
+
+Get tags:
+
+```js
+const tags = await fetch(`${API_BASE_URL}/api/tags`).then((res) => res.json());
+```
+
+Get recommendations:
+
+```js
+const recommendations = await fetch(`${API_BASE_URL}/api/recommend`, {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({
+    userId: demo.data.users[0].id,
+    currentLocation: { lat: 18.7883, lng: 98.9853 },
+    query: "spicy local food with mountain view no pork",
+    language: "en",
+    limit: 5
+  })
+}).then((res) => res.json());
+```
 
 ## Optional Python Embedding Service
 

@@ -29,6 +29,26 @@ Error responses use:
 
 `detail` is only intended for development/debugging.
 
+## GET /
+
+Friendly API landing response.
+
+### Response
+
+```json
+{
+  "service": "thai-food-matchmaker",
+  "status": "ok",
+  "phase": 10,
+  "docs": {
+    "health": "/api/health",
+    "tags": "/api/tags",
+    "recommend": "/api/recommend",
+    "demoIds": "/api/dev/demo-ids"
+  }
+}
+```
+
 ## GET /api/health
 
 Checks whether the backend server is running.
@@ -39,7 +59,7 @@ Checks whether the backend server is running.
 {
   "ok": true,
   "service": "thai-food-matchmaker",
-  "phase": 6
+  "phase": 10
 }
 ```
 
@@ -630,9 +650,366 @@ The recommendation engine:
 ### Current MVP Limitations
 
 - Transport scoring still uses straight-line PostGIS distance, not Google Maps route time.
-- Match history is not saved yet. That is Phase 7.
 - Learned preferences are loaded but not deeply scored yet.
 - Recommendation explanations are simple rule-based strings.
+
+## POST /api/match-history
+
+Saves a viewed/selected/skipped recommendation event and updates learned preferences.
+
+### Request Body
+
+```json
+{
+  "userId": "10000000-0000-0000-0000-000000000001",
+  "groupId": null,
+  "restaurantId": "20000000-0000-0000-0000-000000000001",
+  "action": "selected",
+  "rejectReasons": [],
+  "matchScore": 88,
+  "queryContext": {
+    "query": "spicy local food no pork"
+  },
+  "scoreBreakdown": {
+    "bestMenuSimilarity": 0.82,
+    "distanceKm": 2.1
+  }
+}
+```
+
+### Request Fields
+
+| Name | Type | Required | Description |
+| --- | --- | --- | --- |
+| `userId` | string | yes | User creating the action. |
+| `groupId` | string/null | no | Optional group context. |
+| `restaurantId` | string | yes | Restaurant shown/selected/skipped. |
+| `action` | string | yes | `viewed`, `selected`, or `skipped`. |
+| `rejectReasons` | string[] | no | Skip reasons such as `too_far`, `too_expensive`, `not_safe_allergy`. |
+| `matchScore` | number | no | Score from recommendation result, 0 to 100. |
+| `queryContext` | object | no | Snapshot of query/user context. |
+| `scoreBreakdown` | object | no | Snapshot of score components. |
+
+### Response
+
+Returns `201`.
+
+```json
+{
+  "data": {
+    "matchHistory": {
+      "id": "uuid",
+      "userId": "10000000-0000-0000-0000-000000000001",
+      "groupId": null,
+      "restaurantId": "20000000-0000-0000-0000-000000000001",
+      "action": "selected",
+      "rejectReasons": [],
+      "matchScore": 88,
+      "queryContext": {
+        "query": "spicy local food no pork"
+      },
+      "scoreBreakdown": {
+        "bestMenuSimilarity": 0.82
+      },
+      "createdAt": "2026-05-01T00:00:00.000Z"
+    },
+    "learnedPreferences": {
+      "actionCounts": {
+        "selected": 1
+      },
+      "skipReasonCounts": {},
+      "selectedTagWeights": {
+        "local_hidden_gem": 1,
+        "quiet": 1
+      },
+      "skippedTagWeights": {},
+      "distanceSensitivity": 1,
+      "priceSensitivity": 1
+    }
+  }
+}
+```
+
+### Learner MVP Rules
+
+- `selected` increases weights for restaurant view, atmosphere, service, place-context, and restaurant dietary tags.
+- `skipped` increases skipped tag weights.
+- `skipped` with `too_far` increases `distanceSensitivity`.
+- `skipped` with `too_expensive` increases `priceSensitivity`.
+
+## POST /api/reviews
+
+Saves a tourist review after visiting a restaurant.
+
+### Request Body
+
+```json
+{
+  "userId": "10000000-0000-0000-0000-000000000001",
+  "restaurantId": "20000000-0000-0000-0000-000000000001",
+  "rating": 5,
+  "reviewBubbles": ["good_local_taste", "friendly_staff"],
+  "comment": "Great local taste"
+}
+```
+
+### Request Fields
+
+| Name | Type | Required | Description |
+| --- | --- | --- | --- |
+| `userId` | string | yes | Reviewer user ID. |
+| `restaurantId` | string | yes | Reviewed restaurant ID. |
+| `rating` | number | no | Integer from 1 to 5. |
+| `reviewBubbles` | string[] | no | Review bubble tags. |
+| `comment` | string | no | Optional free-text comment. |
+
+### Response
+
+Returns `201`.
+
+```json
+{
+  "data": {
+    "id": "uuid",
+    "userId": "10000000-0000-0000-0000-000000000001",
+    "restaurantId": "20000000-0000-0000-0000-000000000001",
+    "rating": 5,
+    "reviewBubbles": ["good_local_taste", "friendly_staff"],
+    "comment": "Great local taste",
+    "createdAt": "2026-05-01T00:00:00.000Z"
+  }
+}
+```
+
+## GET /api/reviews/restaurant/:restaurantId
+
+Returns recent reviews for a restaurant.
+
+### Query Parameters
+
+| Name | Type | Required | Description |
+| --- | --- | --- | --- |
+| `limit` | number | no | Default `50`, max `100`. |
+
+## GET /api/dashboard/restaurants/:restaurantId
+
+Returns dashboard insight data for restaurant owners.
+
+This endpoint is MVP rule-based. It aggregates real data from:
+
+- `match_histories`
+- `reviews`
+- `menus`
+- `restaurants`
+- `users`
+
+### Query Parameters
+
+| Name | Type | Required | Description |
+| --- | --- | --- | --- |
+| `days` | number | no | Lookback window. Default `30`, max `365`. |
+
+### Response
+
+```json
+{
+  "data": {
+    "restaurantId": "20000000-0000-0000-0000-000000000001",
+    "restaurantNameTh": "ครัวบ้านสวน",
+    "restaurantNameEn": "Baan Suan Kitchen",
+    "periodDays": 30,
+    "latestDataAt": "2026-05-01T00:00:00.000Z",
+    "funnel": {
+      "impressions": 1240,
+      "selected": 482,
+      "reviews": 156,
+      "skipped": 128,
+      "selectionRate": 38
+    },
+    "aiInsight": {
+      "type": "risk",
+      "title": "AI Insight",
+      "message": "Your restaurant is getting attention, but recent skip events mention allergy or safety concerns."
+    },
+    "sections": {
+      "menu": {
+        "title": "Menu health",
+        "items": [
+          {
+            "menuId": "uuid",
+            "nameTh": "ต้มยำกุ้งแม่น้ำ",
+            "nameEn": "River Prawn Tom Yum",
+            "status": "allergen_visible",
+            "severity": "info",
+            "title": "Allergen information visible",
+            "message": "This menu lists allergen tags: shrimp, seafood."
+          }
+        ]
+      },
+      "context": {
+        "topTalkedAbout": [
+          {
+            "tag": "good_local_taste",
+            "count": 24
+          }
+        ],
+        "storySync": "Tourist perception is broadly aligned with your current restaurant tags."
+      },
+      "opportunity": {
+        "type": "menu_translation",
+        "title": "Translation opportunity",
+        "message": "Add clearer English menu descriptions and allergy notes to increase tourist confidence.",
+        "actionLabel": "Improve menu descriptions"
+      }
+    },
+    "reviewSummary": {
+      "averageRating": 4.7,
+      "reviewBubbleCounts": {
+        "good_local_taste": 24
+      },
+      "topReviewBubbles": [
+        {
+          "key": "good_local_taste",
+          "count": 24
+        }
+      ]
+    },
+    "skipSummary": {
+      "skipReasonCounts": {
+        "too_far": 3
+      },
+      "topSkipReasons": [
+        {
+          "key": "too_far",
+          "count": 3
+        }
+      ]
+    },
+    "touristMix": [
+      {
+        "nationality": "Japan",
+        "count": 28,
+        "percentage": 28
+      }
+    ]
+  }
+}
+```
+
+### Dashboard Field Mapping
+
+- `funnel.impressions` = restaurant `viewed` events.
+- `funnel.selected` = restaurant `selected` events.
+- `funnel.reviews` = reviews in the selected period.
+- `aiInsight` = rule-based business insight.
+- `sections.menu` = menu health and confirmation/allergen issues.
+- `sections.context` = review bubble perception and story sync.
+- `sections.opportunity` = tourist segment or translation opportunity.
+- `touristMix` = nationality mix from users who created match history events.
+
+## PUT /api/images/restaurants/:restaurantId
+
+Updates restaurant image metadata.
+
+This endpoint stores image URL/type only. Actual upload can be handled by Supabase Storage, Cloudinary, S3, or another provider.
+
+### Request Body
+
+```json
+{
+  "imageUrl": "https://storage.example/restaurants/photo.jpg",
+  "imageType": "real"
+}
+```
+
+### Image Types
+
+Allowed `imageType` values:
+
+- `real`
+- `ai_generated`
+- `placeholder`
+
+### Response
+
+```json
+{
+  "data": {
+    "target": "restaurant",
+    "id": "20000000-0000-0000-0000-000000000001",
+    "imageUrl": "https://storage.example/restaurants/photo.jpg",
+    "imageType": "real",
+    "label": null
+  }
+}
+```
+
+## PUT /api/images/menus/:menuId
+
+Updates menu image metadata.
+
+### Request Body
+
+```json
+{
+  "imageUrl": "https://storage.example/menus/tom-yum-illustration.png",
+  "imageType": "ai_generated"
+}
+```
+
+### Response
+
+```json
+{
+  "data": {
+    "target": "menu",
+    "id": "uuid",
+    "imageUrl": "https://storage.example/menus/tom-yum-illustration.png",
+    "imageType": "ai_generated",
+    "label": "AI-generated illustration, not actual photo"
+  }
+}
+```
+
+Frontend must display the `label` whenever it is not null.
+
+## GET /api/dev/demo-ids
+
+Returns a small set of demo IDs for frontend testing.
+
+### Response
+
+```json
+{
+  "data": {
+    "users": [
+      {
+        "id": "10000000-0000-0000-0000-000000000001",
+        "name": "Demo Tourist",
+        "language": "en",
+        "nationality": "United States"
+      }
+    ],
+    "restaurants": [
+      {
+        "id": "20000000-0000-0000-0000-000000000001",
+        "nameTh": "ครัวบ้านสวน",
+        "nameEn": "Baan Suan Kitchen"
+      }
+    ],
+    "menus": [
+      {
+        "id": "uuid",
+        "restaurantId": "20000000-0000-0000-0000-000000000001",
+        "nameTh": "แกงเห็ดรวม",
+        "nameEn": "Mixed Mushroom Curry"
+      }
+    ]
+  }
+}
+```
+
+This endpoint is for demo/prototype integration only.
 
 ### Request Fields
 
