@@ -46,6 +46,8 @@ Not implemented yet:
 - `docs/api-spec.md`
 - `docs/recommender-notebook-review.md`
 - `docs/deployment.md`
+- `docs/ai-agent-test-report.md`
+- `docs/project-requirements-checklist.md`
 
 These are the main files to send to a database collaborator.
 
