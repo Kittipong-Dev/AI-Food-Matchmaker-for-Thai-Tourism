@@ -239,6 +239,30 @@ function parseJsonObject(text) {
   }
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function withRetry(fn, { attempts = 3, delayMs = 1000 } = {}) {
+  let lastError;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error;
+
+      if (attempt < attempts) {
+        await sleep(delayMs * attempt);
+      }
+    }
+  }
+
+  throw lastError;
+}
+
 async function suggestMenuTagsWithOpenAI(input) {
   const response = await fetch('https://api.openai.com/v1/responses', {
     method: 'POST',
@@ -464,7 +488,7 @@ export async function suggestMenuTagsWithLlm(input) {
     try {
       return {
         source: 'openrouter',
-        suggestion: await suggestMenuTagsWithOpenRouter(input)
+        suggestion: await withRetry(() => suggestMenuTagsWithOpenRouter(input))
       };
     } catch (error) {
       return {
@@ -603,7 +627,7 @@ export async function summarizeDashboardInsightWithLlm(input) {
     try {
       return {
         source: 'openrouter',
-        insight: await summarizeDashboardWithOpenRouter(input)
+        insight: await withRetry(() => summarizeDashboardWithOpenRouter(input))
       };
     } catch (error) {
       return {
